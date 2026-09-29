@@ -1,17 +1,17 @@
-# İşlem yapılacak en üst klasör.
-# Script dosya sunucusunda çalışıyorsa yerel disk yolu kullanabilirsiniz.
-$root = "E:\Paylasim\EnUstKlasor"
+# Top-level folder to process.
+# Use a local drive path when running the script on the file server.
+$root = "E:\SharedFolder\TargetFolder"
 
 
-# Log dosyasının kaydedileceği yer.
-# Klasör yoksa aşağıdaki komut oluşturur.
+# Folder where CSV logs will be saved.
+# The following command creates it if it does not exist.
 $logFolder = "C:\Temp"
 New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
 
-# Her çalıştırmada tarih-saat içeren ayrı bir CSV log oluşturur.
+# Creates a separate timestamped CSV log for each execution.
 $logPath = Join-Path $logFolder "remove-readonly-$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
 
-# Log dosyasını açar. UTF-8 BOM sayesinde Excel Türkçe karakterleri düzgün açar.
+# Opens the log file. UTF-8 BOM helps Excel display non-ASCII characters correctly.
 $writer = [System.IO.StreamWriter]::new(
     $logPath,
     $false,
@@ -19,40 +19,40 @@ $writer = [System.IO.StreamWriter]::new(
 )
 
 
-# İşlem sonunda ekrana yazdırılacak sayaçlar.
+# Counters displayed in the final console summary.
 $counts = @{
-    Degisen     = 0   # ReadOnly kaldırılan dosya/klasör sayısı
-    ZatenNormal = 0   # Zaten ReadOnly olmayanların sayısı
-    Hata        = 0   # İşlenemeyen veya taranırken hata alınan öğeler
+    Changed            = 0
+    AlreadyNotReadOnly = 0
+    Errors             = 0
 }
 
 
 function Convert-CsvField {
     param([object]$Value)
 
-    # CSV içinde çift tırnak varsa Excel formatını bozmaması için çiftlenir.
+    # Escapes double quotes to preserve valid CSV formatting.
     '"' + ([string]$Value).Replace('"', '""') + '"'
 }
 
 
 function Write-Log {
     param(
-        [string]$Durum,
-        [string]$Tur,
-        [string]$Yol,
-        [string]$OncekiAttr,
-        [string]$Hata
+        [string]$Status,
+        [string]$Type,
+        [string]$Path,
+        [string]$PreviousAttributes,
+        [string]$Error
     )
 
-    # Her kaydı doğrudan diskteki CSV dosyasına yazar.
-    # Sonuçları RAM'de biriktirmediği için çok büyük klasörlerde güvenlidir.
+    # Writes each record directly to the CSV file.
+    # Results are not collected in memory, making this safe for large folders.
     $fields = @(
         (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),
-        $Durum,
-        $Tur,
-        $Yol,
-        $OncekiAttr,
-        $Hata
+        $Status,
+        $Type,
+        $Path,
+        $PreviousAttributes,
+        $Error
     )
 
     $writer.WriteLine(
@@ -64,62 +64,63 @@ function Write-Log {
 function Process-Item {
     param($Item)
 
-    # Dosya veya klasörün mevcut özniteliklerini saklar.
-    # Örnek: Archive, Hidden, Directory, ReadOnly vb.
+    # Saves the file or directory's existing attributes.
+    # For example: Archive, Hidden, Directory, ReadOnly.
     $oldAttributes = $Item.Attributes
 
-    # Sadece ReadOnly biti var mı kontrol edilir.
+    # Checks whether the ReadOnly attribute is present.
     $isReadOnly = [bool](
         $oldAttributes -band [IO.FileAttributes]::ReadOnly
     )
 
-    # Logda anlaşılır görünmesi için tür belirlenir.
-    $type = if ($Item.PSIsContainer) { "Klasör" } else { "Dosya" }
+    # Determines the item type for the log.
+    $itemType = if ($Item.PSIsContainer) { "Directory" } else { "File" }
 
-    # ReadOnly değilse değişiklik yapmadan sonraki öğeye geçer.
+    # Skips items that are already not ReadOnly.
     if (-not $isReadOnly) {
-        $counts.ZatenNormal++
+        $counts.AlreadyNotReadOnly++
         return
     }
 
     try {
-        # Sadece ReadOnly özniteliğini kaldırır.
-        # Hidden, Archive gibi diğer özniteliklere dokunmaz.
+        # Removes only the ReadOnly attribute.
+        # Other attributes, such as Hidden and Archive, are preserved.
         $Item.Attributes = $oldAttributes -band (
             -bnot [IO.FileAttributes]::ReadOnly
         )
 
-        # Başarılı işlemleri loga yazar.
+        # Logs successful changes.
         Write-Log `
-            -Durum "ReadOnly kaldırıldı" `
-            -Tur $type `
-            -Yol $Item.FullName `
-            -OncekiAttr $oldAttributes `
-            -Hata ""
+            -Status "ReadOnly removed" `
+            -Type $itemType `
+            -Path $Item.FullName `
+            -PreviousAttributes $oldAttributes `
+            -Error ""
 
-        $counts.Degisen++
+        $counts.Changed++
     }
     catch {
-        # Yetki, açık/kilitli dosya veya dosya sistemi sorunu varsa loga yazar.
+        # Logs permission, locked-file, or file-system errors.
         Write-Log `
-            -Durum "HATA" `
-            -Tur $type `
-            -Yol $Item.FullName `
-            -OncekiAttr $oldAttributes `
-            -Hata $_.Exception.Message
+            -Status "ERROR" `
+            -Type $itemType `
+            -Path $Item.FullName `
+            -PreviousAttributes $oldAttributes `
+            -Error $_.Exception.Message
 
-        $counts.Hata++
+        $counts.Errors++
     }
 }
 
 
 try {
-    # CSV sütun başlıkları.
+    # CSV column headers.
     $writer.WriteLine(
-        '"Tarih","Durum","Tür","Yol","Önceki Öznitelik","Hata"'
+        '"Date","Status","Type","Path","Previous Attributes","Error"'
     )
 
-    # Get-ChildItem kök klasörü döndürmediği için kök klasör ayrıca işlenir.
+    # Get-ChildItem does not include the root directory itself,
+    # so it is processed separately.
     try {
         Process-Item (
             Get-Item -LiteralPath $root -Force -ErrorAction Stop
@@ -127,50 +128,51 @@ try {
     }
     catch {
         Write-Log `
-            -Durum "KÖK KLASÖR HATASI" `
-            -Tur "Klasör" `
-            -Yol $root `
-            -OncekiAttr "" `
-            -Hata $_.Exception.Message
+            -Status "ROOT DIRECTORY ERROR" `
+            -Type "Directory" `
+            -Path $root `
+            -PreviousAttributes "" `
+            -Error $_.Exception.Message
 
-        $counts.Hata++
+        $counts.Errors++
     }
 
-    # -Recurse: tüm alt klasör ve dosyalara iner.
-    # -Force: gizli ve sistem öğelerini de kapsar.
-    # 2>&1: tarama hatalarını da yakalayıp CSV'ye yazabilmek içindir.
+    # -Recurse: scans every nested folder and file.
+    # -Force: includes hidden and system items.
+    # 2>&1: captures scan errors and writes them to the CSV log.
     #
-    # Önemli: Öğeler tek tek işlenir; tamamı belleğe alınmaz.
+    # Items are processed one at a time and are not stored
+    # as a full list in memory.
     Get-ChildItem -LiteralPath $root -Force -Recurse -ErrorAction Continue 2>&1 |
         ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                # Erişilemeyen klasör gibi tarama hatalarını loglar.
+                # Logs scan errors, such as inaccessible directories.
                 Write-Log `
-                    -Durum "TARAMA HATASI" `
-                    -Tur "" `
-                    -Yol "" `
-                    -OncekiAttr "" `
-                    -Hata $_.ToString()
+                    -Status "SCAN ERROR" `
+                    -Type "" `
+                    -Path "" `
+                    -PreviousAttributes "" `
+                    -Error $_.ToString()
 
-                $counts.Hata++
+                $counts.Errors++
             }
             else {
-                # Dosya veya klasörü işler.
+                # Processes the current file or directory.
                 Process-Item $_
             }
         }
 }
 finally {
-    # Script hata alsa bile açık log dosyasını düzgün kapatır.
+    # Ensures that the log file is closed even if the script fails.
     $writer.Flush()
     $writer.Dispose()
 }
 
 
-# İşlem özeti ve log konumu.
+# Displays the operation summary and log location.
 Write-Host ""
-Write-Host "Tamamlandı."
-Write-Host "ReadOnly kaldırılan: $($counts.Degisen)"
-Write-Host "Zaten normal olan:   $($counts.ZatenNormal)"
-Write-Host "Hata:                 $($counts.Hata)"
+Write-Host "Completed."
+Write-Host "ReadOnly removed:       $($counts.Changed)"
+Write-Host "Already not ReadOnly:   $($counts.AlreadyNotReadOnly)"
+Write-Host "Errors:                 $($counts.Errors)"
 Write-Host "Log: $logPath"
