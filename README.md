@@ -1,33 +1,34 @@
-# Windows Recursive ReadOnly Attribute Remover
+# Windows Recursive ReadOnly Remover
 
-Windows dosya ve klasör ağacındaki **ReadOnly** özniteliğini tüm alt klasör ve dosyalardan kaldıran PowerShell scripti.
+A PowerShell script that removes the **ReadOnly** file attribute from a target folder, including all nested folders and files.
 
-Script, büyük klasör yapılarında dosyaları bellekte biriktirmeden tek tek işler. Başarılı değişiklikleri ve hataları tarih-saat bilgisiyle CSV log dosyasına kaydeder.
+The script processes items one at a time, making it suitable for large directory trees without holding the entire file list in memory. It writes successful changes and errors to a timestamped CSV log file.
 
-> Bu araç yalnızca dosya sistemi ReadOnly özniteliğini kaldırır. NTFS veya paylaşım izinlerini değiştirmez.
+> This tool changes only the Windows `ReadOnly` attribute. It does not modify NTFS permissions or network-share permissions.
 
-## Özellikler
+## Features
 
-- Kök klasör, alt klasörler ve dosyalar üzerinde çalışır
-- Gizli ve sistem öğelerini de tarar
-- Bellekte tüm dosya listesini tutmaz
-- Başarıları ve hataları CSV formatında loglar
-- İşlem sonunda özet sayaç gösterir
-- Erişilemeyen klasörleri veya yetki hatalarını kayda alır
+- Removes the `ReadOnly` attribute recursively
+- Includes the target folder, subfolders, and files
+- Supports hidden and system items
+- Processes items sequentially to minimize memory usage
+- Creates a timestamped CSV log
+- Logs file-system and access errors
+- Displays an operation summary when complete
 
-## Gereksinimler
+## Requirements
 
-- Windows PowerShell 5.1 veya PowerShell 7+
-- Hedef klasör ve dosyalarda öznitelik değiştirme yetkisi
-- Log oluşturmak için yerel diskte yazma yetkisi
+- Windows PowerShell 5.1 or PowerShell 7+
+- Permission to modify attributes on the target files and folders
+- Permission to write the log file locally
 
-## Kullanım
+## Usage
 
-1. Scripti indirin veya klonlayın.
+1. Download or clone this repository.
 
-2. `Remove-ReadOnly-Recursive.ps1` dosyasını bir metin editöründe açın.
+2. Open `Remove-ReadOnly-Recursive.ps1` in a text editor.
 
-3. Hedef klasörü belirtin:
+3. Set the target directory:
 
 ```powershell
-$root = "E:\Paylasim\EnUstKlasor"
+$root = "E:\SharedFolder\TargetFolder"
